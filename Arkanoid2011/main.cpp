@@ -2,9 +2,8 @@
 // License: MIT License | http://opensource.org/licenses/MIT
 // http://vittorioromeo.info | vittorio.romeo@outlook.com
 
-// Let's now implement the last fundamental game element: the bricks.
-// In this code segment we'll only create the class and "spawn" a
-// grid of bricks in the game world.
+// To finish up our game logic we need to check and respond to
+// "brick vs ball" collisions.
 
 #include <SFML/Graphics.hpp>
 
@@ -60,7 +59,7 @@ private:
 
 const sf::Color Ball::defColor{ sf::Color::Red };
 
-struct Paddle
+class Paddle
 {
 public:
 	static const sf::Color defColor;
@@ -111,8 +110,6 @@ private:
 
 const sf::Color Paddle::defColor{ sf::Color::Red };
 
-// The class for the `Brick` game object will be very similar
-// to the `Paddle` class.
 class Brick
 {
 public:
@@ -122,11 +119,6 @@ public:
 	static constexpr float defVelocity{ 8.f };
 
 	sf::RectangleShape shape;
-
-	// We'll add a `destroyed` bool value that will keep track
-	// of the brick's status. If the brick has been hit by a
-	// ball, `destroyed` will be set to true. In the game loop
-	// we'll then remove all bricks marked as such.
 	bool destroyed{ false };
 
 	Brick(float mX, float mY)
@@ -168,27 +160,67 @@ void solvePaddleBallCollision(const Paddle& mPaddle, Ball& mBall) noexcept
 		mBall.x() < mPaddle.x() ? -Ball::defVelocity : Ball::defVelocity;
 }
 
+// Here's the most complex part of our game: brick-ball collision.
+// We need to find out from what direction the ball hit the brick,
+// and respond accordingly.
+void solveBrickBallCollision(Brick& mBrick, Ball& mBall) noexcept
+{
+	// If there's no intersection, exit the function.
+	if (!isIntersecting(mBrick, mBall)) return;
+
+	// Otherwise, the brick has been hit! Mark it.
+	mBrick.destroyed = true;
+
+	// Let's calculate how much the ball intersects the brick
+	// in every direction.
+	// {Info: ball vs brick collision}
+	float overlapLeft{ mBall.right() - mBrick.left() };
+	float overlapRight{ mBrick.right() - mBall.left() };
+	float overlapTop{ mBall.bottom() - mBrick.top() };
+	float overlapBottom{ mBrick.bottom() - mBall.top() };
+
+	// If the magnitude of the left overlap is smaller than the
+	// right one we can safely assume the ball hit the brick
+	// from the left.
+	bool ballFromLeft(std::abs(overlapLeft) < std::abs(overlapRight));
+
+	// We can apply the same idea for top/bottom collisions.
+	bool ballFromTop(std::abs(overlapTop) < std::abs(overlapBottom));
+
+	// Let's store the minimum overlaps for the X and Y axes.
+	float minOverlapX{ ballFromLeft ? overlapLeft : overlapRight };
+	float minOverlapY{ ballFromTop ? overlapTop : overlapBottom };
+
+	// If the magnitude of the X overlap is less than the magnitude
+	// of the Y overlap, we can safely assume the ball hit the brick
+	// horizontally - otherwise, the ball hit the brick vertically.
+
+	// Then, upon our assumptions, we change either the X or Y velocity
+	// of the ball, creating a "realistic" response for the collision.
+	if (std::abs(minOverlapX) < std::abs(minOverlapY))
+	{
+		mBall.velocity.x =
+			ballFromLeft ? -Ball::defVelocity : Ball::defVelocity;
+	}
+	else
+	{
+		mBall.velocity.y = ballFromTop ? -Ball::defVelocity : Ball::defVelocity;
+	}
+}
+
 int main()
 {
 	Ball ball{ wndWidth / 2.f, wndHeight / 2.f };
 	Paddle paddle{ wndWidth / 2, wndHeight - 50 };
-
-	// As we need to have multiple bricks, we'll use an `std::vector`
-	// to store them.
 	std::vector<Brick> bricks;
 
-	// We'll also define some constant values for the grid-pattern
-	// our bricks will be created in.
+	constexpr int brkCountX{ 11 };
+	constexpr int brkCountY{ 4 };
+	constexpr int brkStartColumn{ 1 };
+	constexpr int brkStartRow{ 2 };
+	constexpr float brkSpacing{ 3.f };
+	constexpr float brkOffsetX{ 22.f };
 
-	constexpr int brkCountX{ 11 };      // How many columns?
-	constexpr int brkCountY{ 4 };       // How many rows?
-	constexpr int brkStartColumn{ 1 };  // What column number to start at?
-	constexpr int brkStartRow{ 2 };     // What row number to start at?
-	constexpr float brkSpacing{ 3 };    // Spacing between adjacent bricks.
-	constexpr float brkOffsetX{ 22.f }; // X offset for the grid pattern.
-
-										// We fill up our vector via a 2D for loop, creating bricks
-										// in a grid-like pattern on the screen.
 	for (int iX{ 0 }; iX < brkCountX; ++iX)
 		for (int iY{ 0 }; iY < brkCountY; ++iY)
 		{
@@ -198,7 +230,7 @@ int main()
 			bricks.emplace_back(brkOffsetX + x, y);
 		}
 
-	sf::RenderWindow window{ { wndWidth, wndHeight }, "Arkanoid - 6" };
+	sf::RenderWindow window{ { wndWidth, wndHeight }, "Arkanoid - 7" };
 	window.setFramerateLimit(60);
 
 	while (true)
@@ -209,10 +241,34 @@ int main()
 
 		ball.update();
 		paddle.update();
+		for (auto& brick : bricks)
+		{
+			brick.update();
 
-		// Let's not forget to update and draw every brick in
-		// the game loop.
-		for (auto& brick : bricks) brick.update();
+			// Let's test collision for every brick.
+			solveBrickBallCollision(brick, ball);
+		}
+
+		// After testing the collision, it is possible that some bricks
+		// are now marked as "destroyed". We need to get rid of all the
+		// destroyed bricks.
+
+		// We will use the "erase-remove idiom" to remove all destroyed
+		// bricks from the brick vector - using a generic C++14 lambda.
+
+		// `std::remove_if` re-arranges the elements of a container
+		// in such a way that elements to be erased are moved towards
+		// the end of a vector.
+
+		// By calling `std::vector::erase` with the iterator returned
+		// by `std::remove_if` and the end iterator, we remove all the
+		// destroyed bricks.
+		bricks.erase(std::remove_if(std::begin(bricks), std::end(bricks),
+			[](const auto& mBrick)
+		{
+			return mBrick.destroyed;
+		}),
+			std::end(bricks));
 
 		solvePaddleBallCollision(paddle, ball);
 
