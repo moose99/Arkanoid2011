@@ -2,21 +2,48 @@
 // License: MIT License | http://opensource.org/licenses/MIT
 // http://vittorioromeo.info | vittorio.romeo@outlook.com
 
-// To finish up our game logic we need to check and respond to
-// "brick vs ball" collisions.
+// In this code segment we'll start improving the game's code
+// architecture. The first step will be creating a `Game` class
+// that will encapsulate the game's state.
 
 #include <SFML/Graphics.hpp>
 
 constexpr unsigned int wndWidth{ 800 }, wndHeight{ 600 };
 
-class Ball
+struct Rectangle
+{
+	sf::RectangleShape shape;
+
+	float x() const noexcept { return shape.getPosition().x; }
+	float y() const noexcept { return shape.getPosition().y; }
+	float width() const noexcept { return shape.getSize().x; }
+	float height() const noexcept { return shape.getSize().y; }
+	float left() const noexcept { return x() - width() / 2.f; }
+	float right() const noexcept { return x() + width() / 2.f; }
+	float top() const noexcept { return y() - height() / 2.f; }
+	float bottom() const noexcept { return y() + height() / 2.f; }
+};
+
+struct Circle
+{
+	sf::CircleShape shape;
+
+	float x() const noexcept { return shape.getPosition().x; }
+	float y() const noexcept { return shape.getPosition().y; }
+	float radius() const noexcept { return shape.getRadius(); }
+	float left() const noexcept { return x() - radius(); }
+	float right() const noexcept { return x() + radius(); }
+	float top() const noexcept { return y() - radius(); }
+	float bottom() const noexcept { return y() + radius(); }
+};
+
+class Ball : public Circle
 {
 public:
 	static const sf::Color defColor;
 	static constexpr float defRadius{ 10.f };
 	static constexpr float defVelocity{ 8.f };
 
-	sf::CircleShape shape;
 	sf::Vector2f velocity{ -defVelocity, -defVelocity };
 
 	Ball(float mX, float mY)
@@ -35,13 +62,6 @@ public:
 
 	void draw(sf::RenderWindow& mTarget) { mTarget.draw(shape); }
 
-	float x() const noexcept { return shape.getPosition().x; }
-	float y() const noexcept { return shape.getPosition().y; }
-	float left() const noexcept { return x() - shape.getRadius(); }
-	float right() const noexcept { return x() + shape.getRadius(); }
-	float top() const noexcept { return y() - shape.getRadius(); }
-	float bottom() const noexcept { return y() + shape.getRadius(); }
-
 private:
 	void solveBoundCollisions() noexcept
 	{
@@ -59,7 +79,7 @@ private:
 
 const sf::Color Ball::defColor{ sf::Color::Red };
 
-class Paddle
+class Paddle : public Rectangle
 {
 public:
 	static const sf::Color defColor;
@@ -67,7 +87,6 @@ public:
 	static constexpr float defHeight{ 20.f };
 	static constexpr float defVelocity{ 8.f };
 
-	sf::RectangleShape shape;
 	sf::Vector2f velocity;
 
 	Paddle(float mX, float mY)
@@ -86,15 +105,6 @@ public:
 
 	void draw(sf::RenderWindow& mTarget) { mTarget.draw(shape); }
 
-	float x() const noexcept { return shape.getPosition().x; }
-	float y() const noexcept { return shape.getPosition().y; }
-	float width() const noexcept { return shape.getSize().x; }
-	float height() const noexcept { return shape.getSize().y; }
-	float left() const noexcept { return x() - width() / 2.f; }
-	float right() const noexcept { return x() + width() / 2.f; }
-	float top() const noexcept { return y() - height() / 2.f; }
-	float bottom() const noexcept { return y() + height() / 2.f; }
-
 private:
 	void processPlayerInput()
 	{
@@ -110,7 +120,7 @@ private:
 
 const sf::Color Paddle::defColor{ sf::Color::Red };
 
-class Brick
+class Brick : public Rectangle
 {
 public:
 	static const sf::Color defColor;
@@ -118,7 +128,6 @@ public:
 	static constexpr float defHeight{ 20.f };
 	static constexpr float defVelocity{ 8.f };
 
-	sf::RectangleShape shape;
 	bool destroyed{ false };
 
 	Brick(float mX, float mY)
@@ -131,15 +140,6 @@ public:
 
 	void update() {}
 	void draw(sf::RenderWindow& mTarget) { mTarget.draw(shape); }
-
-	float x() const noexcept { return shape.getPosition().x; }
-	float y() const noexcept { return shape.getPosition().y; }
-	float width() const noexcept { return shape.getSize().x; }
-	float height() const noexcept { return shape.getSize().y; }
-	float left() const noexcept { return x() - width() / 2.f; }
-	float right() const noexcept { return x() + width() / 2.f; }
-	float top() const noexcept { return y() - height() / 2.f; }
-	float bottom() const noexcept { return y() + height() / 2.f; }
 };
 
 const sf::Color Brick::defColor{ sf::Color::Yellow };
@@ -160,124 +160,150 @@ void solvePaddleBallCollision(const Paddle& mPaddle, Ball& mBall) noexcept
 		mBall.x() < mPaddle.x() ? -Ball::defVelocity : Ball::defVelocity;
 }
 
-// Here's the most complex part of our game: brick-ball collision.
-// We need to find out from what direction the ball hit the brick,
-// and respond accordingly.
 void solveBrickBallCollision(Brick& mBrick, Ball& mBall) noexcept
 {
-	// If there's no intersection, exit the function.
 	if (!isIntersecting(mBrick, mBall)) return;
-
-	// Otherwise, the brick has been hit! Mark it.
 	mBrick.destroyed = true;
 
-	// Let's calculate how much the ball intersects the brick
-	// in every direction.
-	// {Info: ball vs brick collision}
 	float overlapLeft{ mBall.right() - mBrick.left() };
 	float overlapRight{ mBrick.right() - mBall.left() };
 	float overlapTop{ mBall.bottom() - mBrick.top() };
 	float overlapBottom{ mBrick.bottom() - mBall.top() };
 
-	// If the magnitude of the left overlap is smaller than the
-	// right one we can safely assume the ball hit the brick
-	// from the left.
 	bool ballFromLeft(std::abs(overlapLeft) < std::abs(overlapRight));
-
-	// We can apply the same idea for top/bottom collisions.
 	bool ballFromTop(std::abs(overlapTop) < std::abs(overlapBottom));
 
-	// Let's store the minimum overlaps for the X and Y axes.
 	float minOverlapX{ ballFromLeft ? overlapLeft : overlapRight };
 	float minOverlapY{ ballFromTop ? overlapTop : overlapBottom };
 
-	// If the magnitude of the X overlap is less than the magnitude
-	// of the Y overlap, we can safely assume the ball hit the brick
-	// horizontally - otherwise, the ball hit the brick vertically.
-
-	// Then, upon our assumptions, we change either the X or Y velocity
-	// of the ball, creating a "realistic" response for the collision.
 	if (std::abs(minOverlapX) < std::abs(minOverlapY))
-	{
 		mBall.velocity.x =
-			ballFromLeft ? -Ball::defVelocity : Ball::defVelocity;
-	}
+		ballFromLeft ? -Ball::defVelocity : Ball::defVelocity;
 	else
-	{
 		mBall.velocity.y = ballFromTop ? -Ball::defVelocity : Ball::defVelocity;
-	}
 }
 
-int main()
+// The `Game` class will store game constants and elements, and
+// will keep track of the game's state. Also, it will provide
+// functionality to pause and restart the game.
+class Game
 {
+private:
+	// Let's create an enum for the possible game states.
+	enum class State
+	{
+		Paused,
+		InProgress
+	};
+
+	static constexpr int brkCountX{ 11 }, brkCountY{ 4 };
+	static constexpr int brkStartColumn{ 1 }, brkStartRow{ 2 };
+	static constexpr float brkSpacing{ 3.f }, brkOffsetX{ 22.f };
+
+	sf::RenderWindow window{ { wndWidth, wndHeight }, "Arkanoid - 9" };
+
 	Ball ball{ wndWidth / 2.f, wndHeight / 2.f };
 	Paddle paddle{ wndWidth / 2, wndHeight - 50 };
 	std::vector<Brick> bricks;
 
-	constexpr int brkCountX{ 11 };
-	constexpr int brkCountY{ 4 };
-	constexpr int brkStartColumn{ 1 };
-	constexpr int brkStartRow{ 2 };
-	constexpr float brkSpacing{ 3.f };
-	constexpr float brkOffsetX{ 22.f };
+	// Let's add some fields to keep track of the game status.
+	State state{ State::InProgress };
+	bool pausePressedLastFrame{ false };
 
-	for (int iX{ 0 }; iX < brkCountX; ++iX)
-		for (int iY{ 0 }; iY < brkCountY; ++iY)
-		{
-			float x{ (iX + brkStartColumn) * (Brick::defWidth + brkSpacing) };
-			float y{ (iY + brkStartRow) * (Brick::defHeight + brkSpacing) };
+public:
+	Game() { window.setFramerateLimit(60); }
 
-			bricks.emplace_back(brkOffsetX + x, y);
-		}
-
-	sf::RenderWindow window{ { wndWidth, wndHeight }, "Arkanoid - 7" };
-	window.setFramerateLimit(60);
-
-	while (true)
+	// The `restart` method will re-create all game objects and restore
+	// the game to a default state.
+	void restart()
 	{
-		window.clear(sf::Color::Black);
+		state = State::Paused;
 
-		if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Escape)) break;
+		for (int iX{ 0 }; iX < brkCountX; ++iX)
+			for (int iY{ 0 }; iY < brkCountY; ++iY)
+			{
+				float x{ (iX + brkStartColumn) * (Brick::defWidth + brkSpacing) };
+				float y{ (iY + brkStartRow) * (Brick::defHeight + brkSpacing) };
 
-		ball.update();
-		paddle.update();
-		for (auto& brick : bricks)
-		{
-			brick.update();
+				bricks.emplace_back(brkOffsetX + x, y);
+			}
 
-			// Let's test collision for every brick.
-			solveBrickBallCollision(brick, ball);
-		}
-
-		// After testing the collision, it is possible that some bricks
-		// are now marked as "destroyed". We need to get rid of all the
-		// destroyed bricks.
-
-		// We will use the "erase-remove idiom" to remove all destroyed
-		// bricks from the brick vector - using a generic C++14 lambda.
-
-		// `std::remove_if` re-arranges the elements of a container
-		// in such a way that elements to be erased are moved towards
-		// the end of a vector.
-
-		// By calling `std::vector::erase` with the iterator returned
-		// by `std::remove_if` and the end iterator, we remove all the
-		// destroyed bricks.
-		bricks.erase(std::remove_if(std::begin(bricks), std::end(bricks),
-			[](const auto& mBrick)
-		{
-			return mBrick.destroyed;
-		}),
-			std::end(bricks));
-
-		solvePaddleBallCollision(paddle, ball);
-
-		ball.draw(window);
-		paddle.draw(window);
-		for (auto& brick : bricks) brick.draw(window);
-
-		window.display();
+		ball = Ball{ wndWidth / 2.f, wndHeight / 2.f };
+		paddle = Paddle{ wndWidth / 2, wndHeight - 50 };
 	}
 
+	// The `run` method will start the game loop.
+	void run()
+	{
+		while (true)
+		{
+			window.clear(sf::Color::Black);
+
+			if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Escape)) break;
+
+			// The `P` key will toggle the pause. To prevent continuous
+			// use of the pause button, we need to check if the input
+			// was pressed last frame.
+			if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::P))
+			{
+				// If `P` was not pressed last frame, we can toggle
+				// the state.
+				if (!pausePressedLastFrame)
+				{
+					if (state == State::Paused)
+						state = State::InProgress;
+					else if (state == State::InProgress)
+						state = State::Paused;
+				}
+
+				pausePressedLastFrame = true;
+			}
+			else
+				pausePressedLastFrame = false;
+
+			// Let's also use the `R` key to restart the game.
+			if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::R)) restart();
+
+			// If the game is paused, we'll only draw game elements,
+			// without updating them.
+			if (state != State::Paused)
+			{
+				// The rest of the game loop code is exactly the same.
+
+				ball.update();
+				paddle.update();
+				for (auto& brick : bricks)
+				{
+					brick.update();
+					solveBrickBallCollision(brick, ball);
+				}
+
+				bricks.erase(
+					std::remove_if(std::begin(bricks), std::end(bricks),
+						[](const auto& mBrick)
+				{
+					return mBrick.destroyed;
+				}),
+					std::end(bricks));
+
+				solvePaddleBallCollision(paddle, ball);
+			}
+
+			ball.draw(window);
+			paddle.draw(window);
+			for (auto& brick : bricks) brick.draw(window);
+
+			window.display();
+		}
+	}
+};
+
+int main()
+{
+	// To start our game, we create a `Game` instance,
+	// restart it and run it.
+	Game game;
+	game.restart();
+	game.run();
 	return 0;
 }
