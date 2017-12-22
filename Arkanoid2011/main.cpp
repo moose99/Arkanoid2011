@@ -327,7 +327,7 @@ public:
 
 		// We need to load a font from file before using
 		// our text objects.
-		if (!liberationSans.loadFromFile("Debug\\calibri.ttf"))
+		if (!liberationSans.loadFromFile("calibri.ttf"))
 		{
 			std::cout << "Font load failure";
 			return;
