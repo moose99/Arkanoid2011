@@ -1,17 +1,9 @@
-// Copyright (c) 2014 Vittorio Romeo
-// License: MIT License | http://opensource.org/licenses/MIT
-// http://vittorioromeo.info | vittorio.romeo@outlook.com
-
-// In this last code segment, we'll add some features to our game
-// and finish it:
-// * Text
-// * Win/lose states (limited lives)
-// * Multi-hit bricks
-
 #include <iostream>
 #include <memory>
 #include <typeinfo>
 #include <map>
+
+#if 0
 #include <SFML/Graphics.hpp>
 
 constexpr unsigned int wndWidth{ 800 }, wndHeight{ 600 };
@@ -461,3 +453,98 @@ int main()
 	game.run();
 	return 0;
 }
+
+#else
+
+#include<string>
+#include <ostream>
+#include <SDL.h>
+
+const int SCREEN_WIDTH = 640;
+const int SCREEN_HEIGHT = 480;
+
+/**
+* Log an SDL error with some error message to the output stream of our choice
+* @param os The output stream to write the message to
+* @param msg The error message to write, format will be msg error: SDL_GetError()
+*/
+void logSDLError( std::ostream &os, const std::string &msg )
+{
+	os << msg << " error: " << SDL_GetError() << std::endl;
+}
+
+int main( int, char** )
+{
+
+	// Create window and renderer
+	if (SDL_Init( SDL_INIT_EVERYTHING ) != 0)
+	{
+		logSDLError( std::cout, "SDL_Init" );
+		return 1;
+	}
+
+	SDL_Window *window = SDL_CreateWindow( "Lesson 2", 100, 100, SCREEN_WIDTH,
+		SCREEN_HEIGHT, SDL_WINDOW_SHOWN );
+	if (window == nullptr)
+	{
+		logSDLError( std::cout, "CreateWindow" );
+		SDL_Quit();
+		return 1;
+	}
+	SDL_Renderer *renderer = SDL_CreateRenderer( window, -1,
+		SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC );
+	if (renderer == nullptr)
+	{
+		logSDLError( std::cout, "CreateRenderer" );
+		SDL_DestroyWindow( window );
+		SDL_Quit();
+		return 1;
+	}
+
+	// Load bitmap
+	std::string imagePath = "hello.bmp";
+	SDL_Surface *bmp = SDL_LoadBMP( imagePath.c_str() );
+	if (bmp == nullptr)
+	{
+		SDL_DestroyRenderer( renderer );
+		SDL_DestroyWindow( window );
+		std::cout << "SDL_LoadBMP Error: " << SDL_GetError() << std::endl;
+		SDL_Quit();
+		return 1;
+	}
+
+	// upload image to renderer
+	SDL_Texture *tex = SDL_CreateTextureFromSurface( renderer, bmp );
+	SDL_FreeSurface( bmp );
+	if (tex == nullptr)
+	{
+		SDL_DestroyRenderer( renderer );
+		SDL_DestroyWindow( window );
+		std::cout << "SDL_CreateTextureFromSurface Error: " << SDL_GetError() << std::endl;
+		SDL_Quit();
+		return 1;
+	}
+
+	//A sleepy rendering loop, wait for 3 seconds and render and present the screen each time
+	for (int i = 0; i < 3; ++i)
+	{
+		//First clear the renderer
+		SDL_RenderClear( renderer );
+		//Draw the texture
+		SDL_RenderCopy( renderer, tex, NULL, NULL );
+		//Update the screen
+		SDL_RenderPresent( renderer );
+		//Take a quick break after all that hard work
+		SDL_Delay( 1000 );
+	}
+
+	// cleanup
+	SDL_DestroyTexture( tex );
+	SDL_DestroyRenderer( renderer );
+	SDL_DestroyWindow( window );
+	SDL_Quit();
+
+	return 0;
+}
+
+#endif
