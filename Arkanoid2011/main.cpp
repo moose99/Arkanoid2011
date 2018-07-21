@@ -558,6 +558,50 @@ void renderTexture( SDL_Texture *tex, SDL_Renderer *ren, int x, int y,
 	renderTexture( tex, ren, dst, clip );
 }
 
+void fill_circle( SDL_Renderer *renderer, int cx, int cy, int radius, Uint8 r, Uint8 g, Uint8 b, Uint8 a )
+{
+	// Note that there is more to altering the bitrate of this 
+	// method than just changing this value.  See how pixels are
+	// altered at the following web page for tips:
+	//   http://www.libsdl.org/intro.en/usingvideo.html
+	static const int BPP = 4;
+
+	//double ra = (double)radius;
+
+	for (double dy = 1; dy <= radius; dy += 1.0)
+	{
+		// This loop is unrolled a bit, only iterating through half of the
+		// height of the circle.  The result is used to draw a scan line and
+		// its mirror image below it.
+
+		// The following formula has been simplified from our original.  We
+		// are using half of the width of the circle because we are provided
+		// with a center and we need left/right coordinates.
+
+		double dx = floor( sqrt( (2.0 * radius * dy) - (dy * dy) ) );
+		int x = cx - dx;
+		SDL_SetRenderDrawColor( renderer, r, g, b, a );
+		SDL_RenderDrawLine( renderer, cx - dx, cy + dy - radius, cx + dx, cy + dy - radius );
+		SDL_RenderDrawLine( renderer, cx - dx, cy - dy + radius, cx + dx, cy - dy + radius );
+
+		// Grab a pointer to the left-most pixel for each half of the circle
+		/*Uint8 *target_pixel_a = (Uint8 *)surface->pixels + ((int)(cy + r - dy)) * surface->pitch + x * BPP;
+		Uint8 *target_pixel_b = (Uint8 *)surface->pixels + ((int)(cy - r + dy)) * surface->pitch + x * BPP;
+		for (; x <= cx + dx; x++)
+		{
+		*(Uint32 *)target_pixel_a = pixel;
+		*(Uint32 *)target_pixel_b = pixel;
+		target_pixel_a += BPP;
+		target_pixel_b += BPP;
+		}*/
+		/*
+		// sleep for debug
+		SDL_RenderPresent(gRenderer);
+		std::this_thread::sleep_for(std::chrono::milliseconds{ 100 });
+		*/
+	}
+}
+
 int main( int, char** )
 {
 	// init SDL
@@ -656,11 +700,20 @@ int main( int, char** )
 		SDL_SetRenderDrawColor( renderer, 255, 0, 0, 255 );
 		//First clear the renderer with the draw color
 		SDL_RenderClear( renderer );
+
 		//Draw the texture
 		SDL_RenderCopy( renderer, tex, NULL, NULL );
 		//We can draw our message as we do any other texture, since it's been
 		//rendered to a texture
 		renderTexture( image, renderer, x, y );
+		
+		//Render green filled quad and circle
+		SDL_Rect fillRect = { SCREEN_WIDTH / 8, SCREEN_HEIGHT / 8, SCREEN_WIDTH / 8, SCREEN_HEIGHT / 8 };
+		SDL_SetRenderDrawColor( renderer, 0x00, 0xff, 0x00, 0xFF );
+		SDL_RenderFillRect( renderer, &fillRect );
+		fill_circle( renderer, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2+50, 20, 0, 255, 0, 255 );
+		
+
 		//Update the screen
 		SDL_RenderPresent( renderer );
 	}
