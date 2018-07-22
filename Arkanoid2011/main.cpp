@@ -10,6 +10,53 @@
 #include "SDL.h"
 #include "SDL_ttf.h"
 
+const Uint8* gCurrentKeyStates = nullptr;
+
+/**
+* Draw an SDL_Texture to an SDL_Renderer at some destination rect
+* taking a clip of the texture if desired
+* @param tex The source texture we want to draw
+* @param ren The renderer we want to draw to
+* @param dst The destination rectangle to render the texture to
+* @param clip The sub-section of the texture to draw (clipping rect)
+*        default of nullptr draws the entire texture
+*/
+void renderTexture( SDL_Texture *tex, SDL_Renderer *ren, SDL_Rect dst,
+	SDL_Rect *clip = nullptr )
+{
+	SDL_RenderCopy( ren, tex, clip, &dst );
+}
+
+/**
+* Draw an SDL_Texture to an SDL_Renderer at position x, y, preserving
+* the texture's width and height and taking a clip of the texture if desired
+* If a clip is passed, the clip's width and height will be used instead of
+*    the texture's
+* @param tex The source texture we want to draw
+* @param ren The renderer we want to draw to
+* @param x The x coordinate to draw to
+* @param y The y coordinate to draw to
+* @param clip The sub-section of the texture to draw (clipping rect)
+*        default of nullptr draws the entire texture
+*/
+void renderTexture( SDL_Texture *tex, SDL_Renderer *ren, int x, int y, SDL_Rect *clip = nullptr )
+{
+	SDL_Rect dst;
+	dst.x = x;
+	dst.y = y;
+	if (clip != nullptr)
+	{
+		dst.w = clip->w;
+		dst.h = clip->h;
+	}
+	else
+	{
+		SDL_QueryTexture( tex, NULL, NULL, &dst.w, &dst.h );
+	}
+	renderTexture( tex, ren, dst, clip );
+}
+
+
 /**
 * Log an SDL error with some error message to the output stream of our choice
 * @param os The output stream to write the message to
@@ -29,16 +76,9 @@ void logSDLError( std::ostream &os, const std::string &msg )
 * @param renderer The renderer to load the texture in
 * @return An SDL_Texture containing the rendered message, or nullptr if something went wrong
 */
-SDL_Texture* renderText( const std::string &message, const std::string &fontFile,
-	SDL_Color color, int fontSize, SDL_Renderer *renderer )
+SDL_Texture* createText( const std::string &message, TTF_Font *font,
+	SDL_Color color, SDL_Renderer *renderer )
 {
-	//Open the font
-	TTF_Font *font = TTF_OpenFont( fontFile.c_str(), fontSize );
-	if (font == nullptr)
-	{
-		logSDLError( std::cout, "TTF_OpenFont" );
-		return nullptr;
-	}
 	//We need to first render to a surface as that's what TTF_RenderText
 	//returns, then load that surface into a texture
 	SDL_Surface *surf = TTF_RenderText_Blended( font, message.c_str(), color );
@@ -55,7 +95,6 @@ SDL_Texture* renderText( const std::string &message, const std::string &fontFile
 	}
 	//Clean up the surface and font
 	SDL_FreeSurface( surf );
-	TTF_CloseFont( font );
 	return texture;
 }
 
@@ -94,7 +133,7 @@ public:
 
 	virtual ~Entity() {}
 	virtual void update() {}
-	virtual void draw( SDL_Renderer *renderer) {}
+	virtual void draw( SDL_Renderer *renderer ) {}
 };
 
 class Manager
@@ -105,15 +144,15 @@ private:
 
 public:
 	template <typename T, typename... TArgs>
-	T& create(TArgs&&... mArgs)
+	T& create( TArgs&&... mArgs )
 	{
 		static_assert(std::is_base_of<Entity, T>::value,
 			"`T` must be derived from `Entity`");
 
-		auto uPtr(std::make_unique<T>(std::forward<TArgs>(mArgs)...));
-		auto ptr(uPtr.get());
-		groupedEntities[typeid(T).hash_code()].emplace_back(ptr);
-		entities.emplace_back(std::move(uPtr));
+		auto uPtr( std::make_unique<T>( std::forward<TArgs>( mArgs )... ) );
+		auto ptr( uPtr.get() );
+		groupedEntities[typeid(T).hash_code()].emplace_back( ptr );
+		entities.emplace_back( std::move( uPtr ) );
 
 		return *ptr;
 	}
@@ -122,22 +161,22 @@ public:
 	{
 		for (auto& pair : groupedEntities)
 		{
-			auto& vector(pair.second);
+			auto& vector( pair.second );
 
-			vector.erase(std::remove_if(std::begin(vector), std::end(vector),
-				[](auto mPtr)
+			vector.erase( std::remove_if( std::begin( vector ), std::end( vector ),
+				[]( auto mPtr )
 			{
 				return mPtr->destroyed;
-			}),
-				std::end(vector));
+			} ),
+				std::end( vector ) );
 		}
 
-		entities.erase(std::remove_if(std::begin(entities), std::end(entities),
-			[](const auto& mUPtr)
+		entities.erase( std::remove_if( std::begin( entities ), std::end( entities ),
+			[]( const auto& mUPtr )
 		{
 			return mUPtr->destroyed;
-		}),
-			std::end(entities));
+		} ),
+			std::end( entities ) );
 	}
 
 	void clear()
@@ -153,18 +192,18 @@ public:
 	}
 
 	template <typename T, typename TFunc>
-	void forEach(const TFunc& mFunc)
+	void forEach( const TFunc& mFunc )
 	{
-		for (auto ptr : getAll<T>()) mFunc(*reinterpret_cast<T*>(ptr));
+		for (auto ptr : getAll<T>()) mFunc( *reinterpret_cast<T*>(ptr) );
 	}
 
 	void update()
 	{
 		for (auto& e : entities) e->update();
 	}
-	void draw(SDL_Renderer *renderer)
+	void draw( SDL_Renderer *renderer )
 	{
-		for (auto& e : entities) e->draw(renderer);
+		for (auto& e : entities) e->draw( renderer );
 	}
 };
 
@@ -199,7 +238,7 @@ struct Rectangle : public Shape
 
 	void drawShape( SDL_Renderer *renderer )
 	{
-		SDL_Rect rect = { x, y, w, h };	// TODO - round
+		SDL_Rect rect = { x-originX, y-originY, w, h };	// TODO - round
 		SDL_SetRenderDrawColor( renderer, fillColor.r, fillColor.g, fillColor.b, fillColor.a );
 		SDL_RenderFillRect( renderer, &rect );
 	}
@@ -217,7 +256,7 @@ struct Circle : public Shape
 	void setRadius( float r ) { radius = r; }
 	void drawShape( SDL_Renderer *renderer )
 	{	// TODO - round
-		fill_circle( renderer, x, y, radius, fillColor.r, fillColor.g, fillColor.b, fillColor.a );
+		fill_circle( renderer, x-originX, y-originY, radius, fillColor.r, fillColor.g, fillColor.b, fillColor.a );
 	}
 };
 
@@ -225,25 +264,25 @@ class Ball : public Entity, public Circle
 {
 public:
 	static const SDL_Color defColor;
-	static constexpr float defRadius{ 10.f }, defVelocity{ 8.f };
+	static constexpr float defRadius{ 10.f }, defVelocity{ 6.f };
 
 	Vector2f velocity{ -defVelocity, -defVelocity };
 
-	Ball(float mX, float mY)
+	Ball( float mX, float mY )
 	{
-		setPosition(mX, mY);
-		setRadius(defRadius);
-		setFillColor(defColor);
-		setOrigin(defRadius, defRadius);
+		setPosition( mX, mY );
+		setRadius( defRadius );
+		setFillColor( defColor );
+		setOrigin( defRadius, defRadius );
 	}
 
 	void update() override
 	{
-		move(velocity);
+		move( velocity );
 		solveBoundCollisions();
 	}
 
-	void draw(SDL_Renderer *renderer) override 
+	void draw( SDL_Renderer *renderer ) override
 	{
 		drawShape( renderer );
 	}
@@ -276,34 +315,33 @@ public:
 	static constexpr float defWidth{ 60.f }, defHeight{ 20.f };
 	static constexpr float defVelocity{ 8.f };
 
-	Vector2f velocity;
+	Vector2f velocity = { 0,0 };
 
-	Paddle(float mX, float mY)
+	Paddle( float mX, float mY )
 	{
-		setPosition(mX, mY);
-		setSize(defWidth, defHeight );
-		setFillColor(defColor);
-		setOrigin(defWidth / 2.f, defHeight / 2.f);
+		setPosition( mX, mY );
+		setSize( defWidth, defHeight );
+		setFillColor( defColor );
+		setOrigin( defWidth / 2.f, defHeight / 2.f );
 	}
 
 	void update() override
 	{
 		processPlayerInput();
-		move(velocity);
+		move( velocity );
 	}
 
-	void draw(SDL_Renderer *renderer) override 
-	{ 
+	void draw( SDL_Renderer *renderer ) override
+	{
 		drawShape( renderer );
 	}
 
 private:
 	void processPlayerInput()
 	{
-		if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Left) && left() > 0)
+		if ((gCurrentKeyStates[SDL_SCANCODE_LEFT]) && left() > 0)
 			velocity.x = -defVelocity;
-		else if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Right) &&
-			right() < wndWidth)
+		else if ((gCurrentKeyStates[SDL_SCANCODE_RIGHT]) && right() < wndWidth)
 			velocity.x = defVelocity;
 		else
 			velocity.x = 0;
@@ -324,11 +362,11 @@ public:
 	// Let's add a field for the required hits.
 	int requiredHits{ 1 };
 
-	Brick(float mX, float mY)
+	Brick( float mX, float mY )
 	{
-		setPosition(mX, mY);
+		setPosition( mX, mY );
 		setSize( defWidth, defHeight );
-		setOrigin(defWidth / 2.f, defHeight / 2.f);
+		setOrigin( defWidth / 2.f, defHeight / 2.f );
 	}
 
 	void update() override
@@ -336,14 +374,14 @@ public:
 		// Let's alter the color of the brick depending on the
 		// required hits.
 		if (requiredHits == 1)
-			setFillColor(defColorHits1);
+			setFillColor( defColorHits1 );
 		else if (requiredHits == 2)
-			setFillColor(defColorHits2);
+			setFillColor( defColorHits2 );
 		else
-			setFillColor(defColorHits3);
+			setFillColor( defColorHits3 );
 	}
-	void draw(SDL_Renderer *renderer) override 
-	{ 
+	void draw( SDL_Renderer *renderer ) override
+	{
 		drawShape( renderer );
 	}
 };
@@ -353,24 +391,24 @@ const SDL_Color Brick::defColorHits2{ 255, 255, 0, 170 };
 const SDL_Color Brick::defColorHits3{ 255, 255, 0, 255 };
 
 template <typename T1, typename T2>
-bool isIntersecting(const T1& mA, const T2& mB) noexcept
+bool isIntersecting( const T1& mA, const T2& mB ) noexcept
 {
 	return mA.right() >= mB.left() && mA.left() <= mB.right() &&
 		mA.bottom() >= mB.top() && mA.top() <= mB.bottom();
 }
 
-void solvePaddleBallCollision(const Paddle& mPaddle, Ball& mBall) noexcept
+void solvePaddleBallCollision( const Paddle& mPaddle, Ball& mBall ) noexcept
 {
-	if (!isIntersecting(mPaddle, mBall)) return;
+	if (!isIntersecting( mPaddle, mBall )) return;
 
 	mBall.velocity.y = -Ball::defVelocity;
 	mBall.velocity.x =
 		mBall.x < mPaddle.x ? -Ball::defVelocity : Ball::defVelocity;
 }
 
-void solveBrickBallCollision(Brick& mBrick, Ball& mBall) noexcept
+void solveBrickBallCollision( Brick& mBrick, Ball& mBall ) noexcept
 {
-	if (!isIntersecting(mBrick, mBall)) return;
+	if (!isIntersecting( mBrick, mBall )) return;
 
 	// Instead of immediately destroying the brick upon collision,
 	// we decrease and check its required hits first.
@@ -382,13 +420,13 @@ void solveBrickBallCollision(Brick& mBrick, Ball& mBall) noexcept
 	float overlapTop{ mBall.bottom() - mBrick.top() };
 	float overlapBottom{ mBrick.bottom() - mBall.top() };
 
-	bool ballFromLeft(std::abs(overlapLeft) < std::abs(overlapRight));
-	bool ballFromTop(std::abs(overlapTop) < std::abs(overlapBottom));
+	bool ballFromLeft( std::abs( overlapLeft ) < std::abs( overlapRight ) );
+	bool ballFromTop( std::abs( overlapTop ) < std::abs( overlapBottom ) );
 
 	float minOverlapX{ ballFromLeft ? overlapLeft : overlapRight };
 	float minOverlapY{ ballFromTop ? overlapTop : overlapBottom };
 
-	if (std::abs(minOverlapX) < std::abs(minOverlapY))
+	if (std::abs( minOverlapX ) < std::abs( minOverlapY ))
 		mBall.velocity.x =
 		ballFromLeft ? -Ball::defVelocity : Ball::defVelocity;
 	else
@@ -412,13 +450,13 @@ private:
 	static constexpr int brkStartColumn{ 1 }, brkStartRow{ 2 };
 	static constexpr float brkSpacing{ 3.f }, brkOffsetX{ 22.f };
 
-	SDL_Window window{ { wndWidth, wndHeight }, "Arkanoid - 11" };
 	Manager manager;
-
-	// SFML offers an easy-to-use font and text class that we
-	// can use to display remaining lives and game status.
-	sf::Font liberationSans;
-	sf::Text textState, textLives;
+	SDL_Window *window = nullptr;
+	SDL_Renderer *renderer = nullptr;
+	TTF_Font *font15 = nullptr;
+	TTF_Font *font35 = nullptr;
+	SDL_Texture *textState = nullptr;
+	SDL_Texture *textLives = nullptr;
 
 	State state{ State::GameOver };
 	bool pausePressedLastFrame{ false };
@@ -429,26 +467,68 @@ private:
 public:
 	Game()
 	{
-		window.setFramerateLimit(60);
+	}
 
-		// We need to load a font from file before using
-		// our text objects.
-		if (!liberationSans.loadFromFile("calibri.ttf"))
+	// returns -1 on error
+	int init()
+	{
+		// init SDL
+		if (SDL_Init( SDL_INIT_EVERYTHING ) != 0)
 		{
-			std::cout << "Font load failure";
-			return;
+			logSDLError( std::cout, "SDL_Init" );
+			return -1;
 		}
 
-		textState.setFont(liberationSans);
-		textState.setPosition(10, 10);
-		textState.setCharacterSize(35);
-		textState.setFillColor(sf::Color::White);
-		textState.setString("Paused");
+		// init TTF system
+		if (TTF_Init() != 0)
+		{
+			logSDLError( std::cout, "TTF_Init" );
+			SDL_Quit();
+			return -1;
+		}
 
-		textLives.setFont(liberationSans);
-		textLives.setPosition(10, 10);
-		textLives.setCharacterSize(15);
-		textLives.setFillColor(sf::Color::White);
+		// Create window
+		window = SDL_CreateWindow( "ARKANOID", 100, 100, wndWidth, wndHeight, SDL_WINDOW_SHOWN );
+		if (window == nullptr)
+		{
+			logSDLError( std::cout, "CreateWindow" );
+			SDL_Quit();
+			return -1;
+		}
+
+		// create renderer
+		renderer = SDL_CreateRenderer( window, -1,
+			SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC );
+		if (renderer == nullptr)
+		{
+			logSDLError( std::cout, "CreateRenderer" );
+			SDL_DestroyWindow( window );
+			SDL_Quit();
+			return -1;
+		}
+
+		//Open the font
+		font15 = TTF_OpenFont( "calibri.ttf", 15 );
+		font35 = TTF_OpenFont( "calibri.ttf", 35 );
+		if (font15 == nullptr || font35 == nullptr)
+		{
+			logSDLError( std::cout, "TTF_OpenFont" );
+			return -1;
+		}
+
+		SDL_Color white = { 255, 255, 255, 255 };
+		textState = createText( "Paused", font35, white, renderer );
+		textLives = createText( "Lives: 3", font15, white, renderer );
+		if (textState == nullptr || textLives == nullptr)
+		{
+			SDL_DestroyRenderer( renderer );
+			SDL_DestroyWindow( window );
+			TTF_Quit();
+			SDL_Quit();
+			return -1;
+		}
+
+		return 0;	// ok
 	}
 
 	void restart()
@@ -465,25 +545,45 @@ public:
 				float x{ (iX + brkStartColumn) * (Brick::defWidth + brkSpacing) };
 				float y{ (iY + brkStartRow) * (Brick::defHeight + brkSpacing) };
 
-				auto& brick(manager.create<Brick>(brkOffsetX + x, y));
+				auto& brick( manager.create<Brick>( brkOffsetX + x, y ) );
 
 				// Let's set the required hits for the bricks.
 				brick.requiredHits = 1 + ((iX * iY) % 3);
 			}
 
-		manager.create<Ball>(wndWidth / 2.f, wndHeight / 2.f);
-		manager.create<Paddle>(wndWidth / 2.f, wndHeight - 50.0f);
+		manager.create<Ball>( wndWidth / 2.f, wndHeight / 2.f );
+		manager.create<Paddle>( wndWidth / 2.f, wndHeight - 50.0f );
 	}
 
 	void run()
 	{
-		while (true)
+		SDL_Color white = { 255, 255, 255, 255 };
+		SDL_Event e;
+		bool quit = false;
+		while (!quit)
 		{
-			window.clear(sf::Color::Black);
+			while (SDL_PollEvent( &e ))
+			{
+				//If user closes the window, presses escape
+				if (e.type == SDL_QUIT ||
+					(e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE))
+				{
+					quit = true;
+				}
+			}
 
-			if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Escape)) break;
+			// key state
+			gCurrentKeyStates = SDL_GetKeyboardState( NULL );
 
-			if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::P))
+			/* Select the color for drawing. */
+			SDL_SetRenderDrawColor( renderer, 0, 0, 0, 255 );
+			//First clear the renderer with the draw color
+			SDL_RenderClear( renderer );
+
+			if (gCurrentKeyStates[SDL_SCANCODE_ESCAPE])
+				break;
+
+			if (gCurrentKeyStates[SDL_SCANCODE_P])
 			{
 				if (!pausePressedLastFrame)
 				{
@@ -497,201 +597,101 @@ public:
 			else
 				pausePressedLastFrame = false;
 
-			if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::R)) restart();
+			if (gCurrentKeyStates[SDL_SCANCODE_R])
+				restart();
 
 			// If the game is not in progress, do not draw or update
 			// game elements and display information to the player.
 			if (state != State::InProgress)
 			{
+				std::string temp;
 				if (state == State::Paused)
-					textState.setString("Paused");
+					temp = "Paused";
 				else if (state == State::GameOver)
-					textState.setString("Game over!");
+					temp = "Game over!";
 				else if (state == State::Victory)
-					textState.setString("You won!");
+					temp = "You won!";
 
-				window.draw(textState);
+				SDL_DestroyTexture(textState);
+				textState = createText(temp, font35, white, renderer);
+				renderTexture( textState, renderer, 10, 10 );
 			}
 			else
 			{
+				bool updateLives = false;
 				// If there are no more balls on the screen, spawn a
 				// new one and remove a life.
 				if (manager.getAll<Ball>().empty())
 				{
-					manager.create<Ball>(wndWidth / 2.f, wndHeight / 2.f);
-
+					manager.create<Ball>( wndWidth / 2.f, wndHeight / 2.f );
+					updateLives = true;
 					--remainingLives;
 				}
 
 				// If there are no more bricks on the screen,
 				// the player won!
-				if (manager.getAll<Brick>().empty()) state = State::Victory;
+				if (manager.getAll<Brick>().empty()) 
+					state = State::Victory;
 
 				// If the player has no more remaining lives,
 				// it's game over!
-				if (remainingLives <= 0) state = State::GameOver;
+				if (remainingLives <= 0) 
+					state = State::GameOver;
 
 				manager.update();
 
-				manager.forEach<Ball>([this](auto& mBall)
+				manager.forEach<Ball>( [this]( auto& mBall )
 				{
-					manager.forEach<Brick>([&mBall](auto& mBrick)
+					manager.forEach<Brick>( [&mBall]( auto& mBrick )
 					{
-						solveBrickBallCollision(mBrick, mBall);
-					});
-					manager.forEach<Paddle>([&mBall](auto& mPaddle)
+						solveBrickBallCollision( mBrick, mBall );
+					} );
+					manager.forEach<Paddle>( [&mBall]( auto& mPaddle )
 					{
-						solvePaddleBallCollision(mPaddle, mBall);
-					});
-				});
+						solvePaddleBallCollision( mPaddle, mBall );
+					} );
+				} );
 
 				manager.refresh();
 
-				manager.draw(window);
+				manager.draw( renderer );
 
-				// Update lives string and draw it.
-				textLives.setString("Lives: " + std::to_string(remainingLives));
-
-				window.draw(textLives);
+				// Update lives string and draw it. 
+				if (updateLives)
+				{
+					std::string temp("Lives: " + std::to_string(remainingLives));
+					SDL_DestroyTexture(textLives);
+					textLives = createText(temp, font15, white, renderer);
+				}
+				renderTexture( textLives, renderer, 10, 10 );
 			}
 
-			window.display();
+			//Update the screen
+			SDL_RenderPresent( renderer );
 		}
+
+
+		// cleanup
+		TTF_CloseFont( font15 );
+		TTF_CloseFont( font35 );
+		SDL_DestroyTexture( textState );
+		SDL_DestroyTexture( textLives );
+		SDL_DestroyRenderer( renderer );
+		SDL_DestroyWindow( window );
+		SDL_Quit();
 	}
+
 };
 
-int main()
+int main(int , char **)
 {
 	Game game;
+	if (game.init() < 0)
+	{
+		return -1;
+	}
 	game.restart();
 	game.run();
 	return 0;
 }
 
-#if 0
-int main( int, char** )
-{
-	// init SDL
-	if (SDL_Init( SDL_INIT_EVERYTHING ) != 0)
-	{
-		logSDLError( std::cout, "SDL_Init" );
-		return 1;
-	}
-
-	// init TTF system
-	if (TTF_Init() != 0)
-	{
-		logSDLError( std::cout, "TTF_Init" );
-		SDL_Quit();
-		return 1;
-	}
-
-	// Create window and renderer
-	SDL_Window *window = SDL_CreateWindow( "ARKANOID", 100, 100, SCREEN_WIDTH,
-		SCREEN_HEIGHT, SDL_WINDOW_SHOWN );
-	if (window == nullptr)
-	{
-		logSDLError( std::cout, "CreateWindow" );
-		SDL_Quit();
-		return 1;
-	}
-	SDL_Renderer *renderer = SDL_CreateRenderer( window, -1,
-		SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC );
-	if (renderer == nullptr)
-	{
-		logSDLError( std::cout, "CreateRenderer" );
-		SDL_DestroyWindow( window );
-		SDL_Quit();
-		return 1;
-	}
-
-	// Load bitmap
-	std::string imagePath = "hello.bmp";
-	SDL_Surface *bmp = SDL_LoadBMP( imagePath.c_str() );
-	if (bmp == nullptr)
-	{
-		SDL_DestroyRenderer( renderer );
-		SDL_DestroyWindow( window );
-		std::cout << "SDL_LoadBMP Error: " << SDL_GetError() << std::endl;
-		SDL_Quit();
-		return 1;
-	}
-
-	// upload image to renderer
-	SDL_Texture *tex = SDL_CreateTextureFromSurface( renderer, bmp );
-	SDL_FreeSurface( bmp );
-	if (tex == nullptr)
-	{
-		SDL_DestroyRenderer( renderer );
-		SDL_DestroyWindow( window );
-		std::cout << "SDL_CreateTextureFromSurface Error: " << SDL_GetError() << std::endl;
-		SDL_Quit();
-		return 1;
-	}
-
-	SDL_Color color = { 0, 0, 255, 255 };
-	SDL_Texture *image = renderText( "TTF fonts are cool!", "calibri.ttf",
-		color, 16, renderer );
-	if (image == nullptr)
-	{
-		SDL_DestroyRenderer( renderer );
-		SDL_DestroyWindow( window );
-		TTF_Quit();
-		SDL_Quit();
-		return 1;
-	}
-
-	//Get the texture w/h so we can center it in the screen
-	int iW, iH;
-	SDL_QueryTexture( image, NULL, NULL, &iW, &iH );
-	int x = SCREEN_WIDTH / 2 - iW / 2;
-	int y = SCREEN_HEIGHT / 2 - iH / 2;
-
-
-	//e is an SDL_Event variable we've declared before entering the main loop
-	SDL_Event e;
-	bool quit = false;
-	while (!quit)
-	{
-		while (SDL_PollEvent( &e ))
-		{
-			//If user closes the window, presses escape
-			if (e.type == SDL_QUIT ||
-				(e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) )
-			{
-				quit = true;
-			}
-		}
-
-		/* Select the color for drawing. It is set to red here. */
-		SDL_SetRenderDrawColor( renderer, 255, 0, 0, 255 );
-		//First clear the renderer with the draw color
-		SDL_RenderClear( renderer );
-
-		//Draw the texture
-		SDL_RenderCopy( renderer, tex, NULL, NULL );
-		//We can draw our message as we do any other texture, since it's been
-		//rendered to a texture
-		renderTexture( image, renderer, x, y );
-		
-		//Render green filled quad and circle
-		SDL_Rect fillRect = { SCREEN_WIDTH / 8, SCREEN_HEIGHT / 8, SCREEN_WIDTH / 8, SCREEN_HEIGHT / 8 };
-		SDL_SetRenderDrawColor( renderer, 0x00, 0xff, 0x00, 0xFF );
-		SDL_RenderFillRect( renderer, &fillRect );
-		fill_circle( renderer, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2+50, 20, 0, 255, 0, 255 );
-		
-
-		//Update the screen
-		SDL_RenderPresent( renderer );
-	}
-
-	// cleanup
-	SDL_DestroyTexture( tex );
-	SDL_DestroyRenderer( renderer );
-	SDL_DestroyWindow( window );
-	SDL_Quit();
-
-	return 0;
-}
-
-#endif
