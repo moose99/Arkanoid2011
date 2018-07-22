@@ -506,6 +506,13 @@ public:
 			SDL_Quit();
 			return -1;
 		}
+		if (SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND) < 0)
+		{
+			logSDLError(std::cout, "SetRenderDrawBlendMode");
+			SDL_DestroyWindow(window);
+			SDL_Quit();
+			return -1;
+		}
 
 		//Open the font
 		font15 = TTF_OpenFont( "calibri.ttf", 15 );
